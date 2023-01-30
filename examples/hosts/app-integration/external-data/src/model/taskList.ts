@@ -402,22 +402,6 @@ export class TaskList extends DataObject implements ITaskList {
 			}
 		});
 
-		this._draftData.on("valueChanged", (changed) => {
-			if (changed.previousValue === undefined) {
-				// Must be from adding a new task
-				this.handleTaskAdded(changed.key).catch((error) => {
-					console.error(error);
-				});
-			} else if (this.draftData.get(changed.key) === undefined) {
-				// Must be from a deletion
-				this.handleTaskDeleted(changed.key);
-			} else {
-				// Since all data modifications happen within the SharedString or SharedCell (task IDs are immutable),
-				// the root directory should never see anything except adds and deletes.
-				console.error("Unexpected modification to task list");
-			}
-		});
-
 		for (const [id, task] of this.draftData) {
 			const typedTaskData = task as PersistedTask;
 			const [nameSharedString, prioritySharedCell] = await Promise.all([
