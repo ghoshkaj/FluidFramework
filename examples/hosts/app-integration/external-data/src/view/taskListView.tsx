@@ -12,56 +12,67 @@ import type { ITask, ITaskList } from "../model-interface";
 interface ITaskRowProps {
 	readonly task: ITask;
 	readonly deleteTask: () => void;
+    readonly isLeader: boolean;
 }
 
 /**
  * The view for a single task in the TaskListView, as a table row.
  */
 const TaskRow: React.FC<ITaskRowProps> = (props: ITaskRowProps) => {
-	const { task, deleteTask } = props;
+	const { task, deleteTask, isLeader } = props;
 	const priorityRef = useRef<HTMLInputElement>(null);
-	const [incomingName, setIncomingName] = useState<string | undefined>(task.incomingName);
-	const [incomingPriority, setIncomingPriority] = useState<number | undefined>(
-		task.incomingPriority,
+	const [externalName, setExternalName] = useState<string | undefined>(task.externalName);
+	const [externalPriority, setExternalPriority] = useState<number | undefined>(
+		task.externalPriority,
 	);
-	const [incomingType, setIncomingType] = useState<string | undefined>(task.incomingType);
+	const [changeType, setChangeType] = useState<string | undefined>(task.changeType);
 	useEffect(() => {
 		const updateFromRemotePriority = (): void => {
 			if (priorityRef.current !== null) {
 				priorityRef.current.value = task.priority.toString();
 			}
 		};
-		const showIncomingPriority = (): void => {
-			setIncomingPriority(task.incomingPriority);
-			setIncomingType(task.incomingType);
+		const showExternalPriority = (): void => {
+            if (isLeader) {
+                setExternalPriority(task.externalPriority);
+            } else {
+                setExternalName("External Name Changed");
+            }
+			setChangeType(task.changeType);
 		};
-		const showIncomingName = (): void => {
-			setIncomingName(task.incomingName);
-			setIncomingType(task.incomingType);
+		const showExternalName = (): void => {
+            if (isLeader) {
+                setExternalName(task.externalName)
+            } else {
+                setExternalName("External Name Changed");
+            }
+			setChangeType(task.changeType);
 		};
 		task.on("priorityChanged", updateFromRemotePriority);
-		task.on("incomingPriorityChanged", showIncomingPriority);
-		task.on("incomingNameChanged", showIncomingName);
+		task.on("externalPriorityChanged", showExternalPriority);
+		task.on("externalNameChanged", showExternalName);
 		updateFromRemotePriority();
 		return (): void => {
 			task.off("priorityChanged", updateFromRemotePriority);
-			task.off("incomingPriorityChanged", showIncomingPriority);
-			task.off("incomingNameChanged", showIncomingName);
+			task.off("externalPriorityChanged", showExternalPriority);
+			task.off("externalNameChanged", showExternalName);
 		};
-	}, [task, incomingName, incomingPriority, incomingType]);
+	}, [task, externalName, externalPriority, changeType]);
 
 	const inputHandler = (e: React.FormEvent): void => {
 		const newValue = Number.parseInt((e.target as HTMLInputElement).value, 10);
 		task.priority = newValue;
 	};
 
-	const diffVisible = incomingType === undefined;
-	const showPriority = !diffVisible && incomingPriority !== undefined ? "visible" : "hidden";
-	const showName = !diffVisible && incomingName !== undefined ? "visible" : "hidden";
-	const showAcceptButton = diffVisible ? "hidden" : "visible";
+     console.log(isLeader);
+
+	const diffVisible = changeType !== undefined;
+	const showPriority = diffVisible && externalPriority !== undefined ? "visible" : "hidden";
+	const showName = diffVisible && externalName !== undefined ? "visible" : "hidden";
+	const showAcceptButton = isLeader && diffVisible ? "visible" : "hidden" ;
 
 	let diffColor: string = "white";
-	switch (incomingType) {
+	switch (changeType) {
 		case "add": {
 			diffColor = "green";
 			break;
@@ -98,13 +109,13 @@ const TaskRow: React.FC<ITaskRowProps> = (props: ITaskRowProps) => {
 					❌
 				</button>
 			</td>
-			<td style={{ visibility: showName, backgroundColor: diffColor }}>{incomingName}</td>
+			<td style={{ visibility: showName, backgroundColor: diffColor }}>{externalName}</td>
 			<td style={{ visibility: showPriority, backgroundColor: diffColor }}>
-				{incomingPriority}
+				{externalPriority}
 			</td>
 			<td>
 				<button
-					onClick={task.overwriteWithIncomingData}
+					onClick={task.overwriteWithExternalData}
 					style={{ visibility: showAcceptButton }}
 				>
 					Accept change
@@ -119,13 +130,14 @@ const TaskRow: React.FC<ITaskRowProps> = (props: ITaskRowProps) => {
  */
 export interface ITaskListViewProps {
 	readonly taskList: ITaskList;
+    readonly isLeader: boolean;
 }
 
 /**
  * A tabular, editable view of the task list.  Includes a save button to sync the changes back to the data source.
  */
 export const TaskListView: React.FC<ITaskListViewProps> = (props: ITaskListViewProps) => {
-	const { taskList } = props;
+	const { taskList, isLeader } = props;
 
 	const [tasks, setTasks] = useState<ITask[]>(taskList.getTasks());
 	useEffect(() => {
@@ -142,7 +154,7 @@ export const TaskListView: React.FC<ITaskListViewProps> = (props: ITaskListViewP
 	}, [taskList]);
 
 	const taskRows = tasks.map((task: ITask) => (
-		<TaskRow key={task.id} task={task} deleteTask={(): void => taskList.deleteTask(task.id)} />
+		<TaskRow key={task.id} task={task} deleteTask={(): void => taskList.deleteTask(task.id)} isLeader={isLeader} />
 	));
 
 	return (
@@ -160,7 +172,7 @@ export const TaskListView: React.FC<ITaskListViewProps> = (props: ITaskListViewP
 				</thead>
 				<tbody>{taskRows}</tbody>
 			</table>
-			<button onClick={taskList.saveChanges}>Save changes</button>
+			{isLeader && <button onClick={taskList.saveChanges}>Save changes</button>}
 		</div>
 	);
 };
