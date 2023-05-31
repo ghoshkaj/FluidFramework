@@ -272,9 +272,6 @@ export interface Covariant<T> {
 export function createEmitter<E extends Events<E>>(noListeners?: NoListenersCallback<E>): ISubscribable<E> & IEmitter<E> & HasListeners<E>;
 
 // @alpha
-export const createField: unique symbol;
-
-// @alpha
 export interface CrossFieldManager<T = unknown> {
     get(target: CrossFieldTarget, revision: RevisionTag | undefined, id: ChangesetLocalId, addDependency: boolean): T | undefined;
     getOrCreate(target: CrossFieldTarget, revision: RevisionTag | undefined, id: ChangesetLocalId, newValue: T, invalidateDependents: boolean): T;
@@ -371,15 +368,19 @@ export interface DetachedField extends Opaque<Brand<string, "tree.DetachedField"
 // @alpha
 export interface EditableField extends MarkedArrayLike<UnwrappedEditableTree> {
     readonly [proxyTargetSymbol]: object;
+    get content(): EditableTree | undefined | EditableField;
+    set content(newContent: NewFieldContent);
     readonly context: EditableTreeContext;
+    delete(): void;
     deleteNodes(index: number, count?: number): void;
     readonly fieldKey: FieldKey;
     readonly fieldSchema: FieldStoredSchema;
     getNode(index: number): EditableTree;
-    insertNodes(index: number, newContent: ITreeCursor | ITreeCursor[]): void;
+    insertNodes(index: number, newContent: NewFieldContent): void;
     moveNodes(sourceIndex: number, count: number, destIndex: number, destinationField?: EditableField): void;
     readonly parent?: EditableTree;
-    replaceNodes(index: number, newContent: ITreeCursor | ITreeCursor[], count?: number): void;
+    replaceNodes(index: number, newContent: NewFieldContent, count?: number): void;
+    setContent(newContent: NewFieldContent): void;
 }
 
 // @alpha (undocumented)
@@ -395,7 +396,6 @@ UntypedSequenceField & MarkedArrayLike<TypedChild>
 // @alpha
 export interface EditableTree extends Iterable<EditableField>, ContextuallyTypedNodeDataObject {
     readonly [contextSymbol]: EditableTreeContext;
-    [createField](fieldKey: FieldKey, newContent: ITreeCursor | ITreeCursor[]): void;
     [getField](fieldKey: FieldKey): EditableField;
     // (undocumented)
     [on]<K extends keyof EditableTreeEvents>(eventName: K, listener: EditableTreeEvents[K]): () => void;
@@ -404,7 +404,6 @@ export interface EditableTree extends Iterable<EditableField>, ContextuallyTyped
         readonly index: number;
     };
     readonly [proxyTargetSymbol]: object;
-    [replaceField](fieldKey: FieldKey, newContent: ITreeCursor | ITreeCursor[]): void;
     readonly [typeNameSymbol]: TreeSchemaIdentifier;
     readonly [typeSymbol]: NamedTreeSchema;
     [valueSymbol]: Value;
@@ -417,10 +416,10 @@ export interface EditableTreeContext extends ISubscribable<ForestEvents> {
     free(): void;
     prepareForEdit(): void;
     get root(): EditableField;
-    set root(data: ContextuallyTypedFieldData);
+    set root(data: NewFieldContent);
     readonly schema: SchemaDataAndPolicy;
     get unwrappedRoot(): UnwrappedEditableField;
-    set unwrappedRoot(data: ContextuallyTypedFieldData);
+    set unwrappedRoot(data: NewFieldContent);
 }
 
 // @alpha
@@ -516,14 +515,14 @@ export interface FieldChange {
 // @alpha
 export interface FieldChangeHandler<TChangeset, TEditor extends FieldEditor<TChangeset> = FieldEditor<TChangeset>> {
     // (undocumented)
-    codecsFactory: (childCodec: IJsonCodec<NodeChangeset>) => ICodecFamily<TChangeset>;
+    readonly codecsFactory: (childCodec: IJsonCodec<NodeChangeset>) => ICodecFamily<TChangeset>;
     // (undocumented)
-    editor: TEditor;
+    readonly editor: TEditor;
     // (undocumented)
     intoDelta(change: TChangeset, deltaFromChild: ToDelta): Delta.MarkList;
     isEmpty(change: TChangeset): boolean;
     // (undocumented)
-    rebaser: FieldChangeRebaser<TChangeset>;
+    readonly rebaser: FieldChangeRebaser<TChangeset>;
     // (undocumented)
     _typeCheck?: Invariant<TChangeset>;
 }
@@ -576,6 +575,7 @@ export const FieldKinds: {
     readonly value: ValueFieldKind;
     readonly optional: Optional;
     readonly sequence: Sequence;
+    readonly nodeIdentifier: NodeIdentifierFieldKind;
     readonly forbidden: Forbidden;
 };
 
@@ -774,8 +774,7 @@ export interface IDefaultEditBuilder {
     addNodeExistsConstraint(path: UpPath): void;
     // (undocumented)
     addValueConstraint(path: UpPath, value: Value): void;
-    // (undocumented)
-    move(sourceField: FieldUpPath, sourceIndex: number, count: number, destinationField: FieldUpPath, destIndex: number): void;
+    move(sourceField: FieldUpPath, sourceIndex: number, count: number, destinationField: FieldUpPath, destinationIndex: number): void;
     // (undocumented)
     optionalField(field: FieldUpPath): OptionalFieldEditBuilder;
     // (undocumented)
@@ -785,15 +784,6 @@ export interface IDefaultEditBuilder {
     // (undocumented)
     valueField(field: FieldUpPath): ValueFieldEditBuilder;
 }
-
-// @alpha
-export type Identifier = number;
-
-// @alpha
-export const identifierKey: GlobalFieldKey;
-
-// @alpha
-export const identifierKeySymbol: GlobalFieldKeySymbol;
 
 // @alpha
 export interface IEditableForest extends IForestSubscription {
@@ -937,6 +927,9 @@ export function isContextuallyTypedNodeDataObject(data: ContextuallyTypedNodeDat
 export function isEditableField(field: UnwrappedEditableField): field is EditableField;
 
 // @alpha
+export function isEditableTree(field: UnwrappedEditableField): field is EditableTree;
+
+// @alpha
 export type IsEvent<Event> = Event extends (...args: any[]) => any ? true : false;
 
 // @alpha
@@ -953,12 +946,13 @@ export interface ISharedTreeView extends AnchorLocator {
     readonly events: ISubscribable<ViewEvents>;
     readonly forest: IForestSubscription;
     fork(): SharedTreeView;
-    readonly identifiedNodes: ReadonlyMap<Identifier, EditableTree>;
+    generateNodeIdentifier(): NodeIdentifier;
+    readonly identifiedNodes: ReadonlyMap<NodeIdentifier, EditableTree>;
     merge(view: SharedTreeView): void;
     rebase(view: SharedTreeView): void;
     redo(): void;
     get root(): UnwrappedEditableField;
-    set root(data: ContextuallyTypedNodeData | undefined);
+    set root(data: NewFieldContent);
     readonly rootEvents: ISubscribable<AnchorSetRootEvents>;
     schematize<TRoot extends GlobalFieldSchema>(config: SchematizeConfiguration<TRoot>): ISharedTreeView;
     readonly storedSchema: StoredSchemaRepository;
@@ -986,13 +980,8 @@ export interface ISubscribable<E extends Events<E>> {
 }
 
 // @alpha
-export function isUnwrappedNode(field: UnwrappedEditableField): field is EditableTree;
-
-// @alpha
-export function isWritableArrayLike(data: ContextuallyTypedFieldData): data is MarkedArrayLike<ContextuallyTypedNodeData>;
-
-// @alpha
 export interface ITreeCursor {
+    readonly [CursorMarker]: true;
     readonly chunkLength: number;
     readonly chunkStart: number;
     enterField(key: FieldKey): void;
@@ -1287,6 +1276,9 @@ export type NestedMap<Key1, Key2, Value> = Map<Key1, Map<Key2, Value>>;
 // @alpha
 export const neverTree: TreeStoredSchema;
 
+// @alpha
+export type NewFieldContent = ITreeCursor | readonly ITreeCursor[] | ContextuallyTypedFieldData;
+
 // @alpha (undocumented)
 export type NodeChangeComposer = (changes: TaggedChange<NodeChangeset>[]) => NodeChangeset;
 
@@ -1294,7 +1286,8 @@ export type NodeChangeComposer = (changes: TaggedChange<NodeChangeset>[]) => Nod
 export type NodeChangeInverter = (change: NodeChangeset, index: number | undefined) => NodeChangeset;
 
 // @alpha (undocumented)
-export type NodeChangeRebaser = (change: NodeChangeset | undefined, baseChange: NodeChangeset | undefined, deleted?: boolean) => NodeChangeset | undefined;
+export type NodeChangeRebaser = (change: NodeChangeset | undefined, baseChange: NodeChangeset | undefined,
+stateChange?: NodeExistenceStateChange) => NodeChangeset | undefined;
 
 // @alpha
 export interface NodeChangeset extends HasFieldChanges {
@@ -1316,10 +1309,37 @@ export interface NodeData {
 type NodeDataFor<Mode extends ApiMode, TSchema extends TreeSchema> = TypedNode<TSchema, Mode>;
 
 // @alpha (undocumented)
+export enum NodeExistenceStateChange {
+    // (undocumented)
+    Deleted = 1,
+    // (undocumented)
+    Revived = 2,
+    // (undocumented)
+    Unchanged = 0
+}
+
+// @alpha (undocumented)
 export interface NodeExistsConstraint {
     // (undocumented)
     violated: boolean;
 }
+
+// @alpha
+export type NodeIdentifier = Brand<StableId, "Node Identifier">;
+
+// @alpha (undocumented)
+export interface NodeIdentifierFieldKind extends BrandedFieldKind<"NodeIdentifier", Multiplicity.Value, FieldEditor<any>> {
+}
+
+// @alpha
+export const nodeIdentifierKey: GlobalFieldKey;
+
+// @alpha
+export function nodeIdentifierSchema(): {
+    schema: SchemaLibrary;
+    field: GlobalFieldSchema<NodeIdentifierFieldKind>;
+    type: TreeSchemaIdentifier;
+};
 
 // @alpha (undocumented)
 export type NodeReviver = (revision: RevisionTag, index: number, count: number) => Delta.ProtoNode[];
@@ -1438,9 +1458,6 @@ type _RecursiveTrick = never;
 export interface RepairDataStore<TTree = Delta.ProtoNode, TRevisionTag = unknown> extends ReadonlyRepairDataStore<TTree, TRevisionTag> {
     capture(change: Delta.Root, revision: TRevisionTag): void;
 }
-
-// @alpha
-export const replaceField: unique symbol;
 
 // @alpha
 type RequiredFields<T> = [
@@ -1581,7 +1598,7 @@ export interface SchemaPolicy {
 // @alpha
 export interface SchematizeConfiguration<TRoot extends GlobalFieldSchema = GlobalFieldSchema> {
     readonly allowedSchemaModifications: AllowedUpdateType;
-    readonly initialTree: SchemaAware.TypedField<TRoot["schema"], SchemaAware.ApiMode.Simple>;
+    readonly initialTree: SchemaAware.TypedField<TRoot["schema"], SchemaAware.ApiMode.Simple> | readonly ITreeCursor[];
     readonly schema: TypedSchemaCollection<TRoot>;
 }
 
@@ -1592,7 +1609,7 @@ export interface Sequence extends BrandedFieldKind<"Sequence", Multiplicity.Sequ
 // @alpha (undocumented)
 export interface SequenceFieldEditBuilder {
     delete(index: number, count: number): void;
-    insert(index: number, newContent: ITreeCursor | ITreeCursor[]): void;
+    insert(index: number, newContent: ITreeCursor | readonly ITreeCursor[]): void;
     move(sourceIndex: number, count: number, destIndex: number): void;
     revive(index: number, count: number, detachedBy: RevisionTag, reviver: NodeReviver, detachIndex: number, isIntention?: true): void;
 }
@@ -1623,7 +1640,9 @@ export class SharedTreeView implements ISharedTreeView {
     // (undocumented)
     fork(): SharedTreeView;
     // (undocumented)
-    get identifiedNodes(): ReadonlyMap<Identifier, EditableTree>;
+    generateNodeIdentifier(): NodeIdentifier;
+    // (undocumented)
+    get identifiedNodes(): ReadonlyMap<NodeIdentifier, EditableTree>;
     // (undocumented)
     locate(anchor: Anchor): AnchorNode | undefined;
     // (undocumented)
@@ -1887,19 +1906,25 @@ export interface UntypedField extends MarkedArrayLike<UnwrappedUntypedTree> {
 
 // @alpha
 interface UntypedOptionalField extends UntypedField {
+    readonly content: UntypedTreeCore;
+    delete(): void;
     readonly fieldSchema: FieldStoredSchema & {
         readonly kind: Optional;
     };
+    setContent(newContent: ITreeCursor | ContextuallyTypedNodeData | undefined): void;
 }
 
 // @alpha
 interface UntypedSequenceField extends UntypedField {
+    delete(): void;
     deleteNodes(index: number, count?: number): void;
     readonly fieldSchema: FieldStoredSchema & {
         readonly kind: Sequence;
     };
-    insertNodes(index: number, newContent: ITreeCursor | ITreeCursor[]): void;
-    replaceNodes(index: number, newContent: ITreeCursor | ITreeCursor[], count?: number): void;
+    insertNodes(index: number, newContent: NewFieldContent): void;
+    moveNodes(sourceIndex: number, count: number, destIndex: number, destinationField?: UntypedField): void;
+    replaceNodes(index: number, newContent: NewFieldContent, count?: number): void;
+    setContent(newContent: NewFieldContent): void;
 }
 
 // @alpha
@@ -1937,9 +1962,11 @@ export type UntypedTreeOrPrimitive = UntypedTree | PrimitiveValue;
 
 // @alpha
 interface UntypedValueField extends UntypedField {
+    readonly content: UntypedTreeCore;
     readonly fieldSchema: FieldStoredSchema & {
         readonly kind: ValueFieldKind;
     };
+    setContent(newContent: ITreeCursor | ContextuallyTypedNodeData): void;
 }
 
 // @alpha
