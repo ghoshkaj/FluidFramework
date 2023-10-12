@@ -109,5 +109,8 @@
 				"@types/node"
 			]
 		}
+	},
+	"dependencies": {
+		"decompress": "4.2.1"
 	}
 }
